@@ -88,7 +88,7 @@ _layout_option() {
 # - if value supplied, stores key=value, otherwise retrieves it
 # - many thanks to Romain Francoise for help with this!
 _tmux_fetch_or_store() {
-    local key="${1}_$tmux_window_id"
+    local key="${1}"
     if [[ $# -gt 1 ]]; then
         $tmux set-environment $key "$2"
     else
@@ -108,6 +108,12 @@ _vim_pane_id() {
     _tmux_fetch_or_store tmux_vim_pane "$@"
 }
 
+# _vim_window_id [id]
+# - fetch or store the id for the vim window
+_vim_window_id() {
+    _tmux_fetch_or_store tmux_vim_window "$@"
+}
+
 _vim_last_dir() {
     _tmux_fetch_or_store tmux_vim_last_dir "$@"
 }
@@ -121,7 +127,7 @@ _vim_send_keys() {
 
 _tmux_is_running() {
     local pane_id=$( _vim_pane_id )
-    [[ -n $pane_id ]] && $tmux lsp -F '#{pane_id}' | grep -q ^$pane_id$
+    [[ -n $pane_id ]] && $tmux lsp -sF '#{pane_id}' | grep -q ^$pane_id$
 }
 
 # _tmux_version
@@ -177,6 +183,7 @@ _vim_op() {
 _vim_start() {
     if _tmux_is_running; then
         # tmux_vim already exists - try to select that pane
+        $tmux select-window -t $( _vim_window_id ) 
         $tmux select-pane -t $( _vim_pane_id ) && return 1
 
         # If we get here, that pane no longer exists, so fall thru
@@ -286,6 +293,10 @@ _vim_start() {
         [[ $autosplit > 0 ]] && vim_args+=" -$window_method$count"
         ;;
 
+    fullscreen)
+        local isfullscreen=true
+        ;;
+
     *)
         _die Unknown TMUX_VIM_LAYOUT:mode "$layout_args"
         ;;
@@ -301,13 +312,19 @@ _vim_start() {
     fi
 
     # Split a new pane, start vim in it, and record the pane index
-    local tmux_vim_pane=$( $tmux split-window -P -$split_method -l $split_size \
-                        "exec $vim_bin $vim_args $vim_files" )
+    if [ $isfullscreen ]; then
+        local tmux_vim_pane=$( $tmux new-window -P \
+                            "exec $vim_bin $vim_args $vim_files" )
+    else
+        local tmux_vim_pane=$( $tmux split-window -P -$split_method -l $split_size \
+                            "exec $vim_bin $vim_args $vim_files" )
+    fi
 
     # Now convert the pane index into a global persistent id
     # 0:1.1: [100x88] [history 0/10000, 0 bytes] %2
     # ^^^^^ $tmux_vim_pane              pane_id  ^^
-    _vim_pane_id $( $tmux lsp -a | grep ^$tmux_vim_pane: | grep -o '%[0-9]\+' )
+    _vim_pane_id $( $tmux lsp -a | grep ^$tmux_vim_pane | grep -o '%[0-9]\+' )
+    _vim_window_id ${tmux_vim_pane#*:}
     _vim_last_dir "$PWD"
 
     # Swap the panes if necessary. tmux only does right/bottom
